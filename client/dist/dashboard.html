@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FinSecure Nexus - Multi-Domain Security Platform</title>
+  <meta name="description" content="Cloud-native multi-domain security detection system for financial institutions" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>" />
+  
+  <!-- Leaflet CSS for maps -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <!-- Bootstrap CSS for styling -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <style>
+    :root {
+      --primary-color: #3B82F6;
+      --secondary-color: #10B981;
+      --danger-color: #EF4444;
+      --warning-color: #F59E0B;
+      --success-color: #10B981;
+      --dark-color: #1F2937;
+      --light-color: #F9FAFB;
+      --border-color: #E5E7EB;
+      --text-color: #111827;
+      --text-secondary: #6B7280;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background-color: var(--light-color);
+      color: var(--text-color);
+      line-height: 1.6;
+    }
+
+    .app-header {
+      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+      color: white;
+      padding: 1rem 2rem;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .app-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .logo {
+      font-size: 2.5rem;
+    }
+
+    .header-subtitle {
+      font-size: 1rem;
+      opacity: 0.9;
+    }
+
+    .app-main {
+      flex: 1;
+      padding: 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .dashboard {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .dashboard-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .dashboard-title h2 {
+      font-size: 2rem;
+      font-weight: 600;
+      color: var(--text-color);
+    }
+
+    .dashboard-title p {
+      color: var(--text-secondary);
+      margin-top: 0.5rem;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success-color);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2rem;
+    }
+
+    .overview-card {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      border: 1px solid var(--border-color);
+    }
+
+    .overview-card h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      color: var(--text-color);
+    }
+
+    .overview-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 1rem;
+    }
+
+    .stat {
+      text-align: center;
+      padding: 1rem;
+      background: var(--light-color);
+      border-radius: 8px;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text-color);
+    }
+
+    .stat-value.critical {
+      color: var(--danger-color);
+    }
+
+    .stat-value.warning {
+      color: var(--warning-color);
+    }
+
+    .recent-items {
+      margin-top: 1rem;
+    }
+
+    .recent-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .recent-item:last-child {
+      border-bottom: none;
+    }
+
+    .item-content {
+      flex: 1;
+    }
+
+    .item-title {
+      font-weight: 500;
+      color: var(--text-color);
+    }
+
+    .item-time {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .severity-badge {
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .severity-low {
+      background: #E0F2FE;
+      color: #0369A1;
+    }
+
+    .severity-medium {
+      background: #FEF3C7;
+      color: #D97706;
+    }
+
+    .severity-high {
+      background: #FEE2E2;
+      color: #DC2626;
+    }
+
+    .severity-critical {
+      background: #FECACA;
+      color: #991B1B;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid var(--border-color);
+      border-top: 4px solid var(--primary-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 2rem auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error-state {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-secondary);
+    }
+
+    .btn-primary {
+      background: var(--primary-color);
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      color: white;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-header">
+    <div class="header-content">
+      <h1 class="app-title">
+        <span class="logo">🛡️</span>
+        FinSecure Nexus
+      </h1>
+      <p class="header-subtitle">Multi-Domain Security Detection Platform</p>
+    </div>
+  </div>
+
+  <div class="app-main">
+    <div class="dashboard">
+      <div class="dashboard-header">
+        <div class="dashboard-title">
+          <h2>Security Dashboard</h2>
+          <p>Real-time security monitoring and threat detection</p>
+        </div>
+        <div class="status-indicator">
+          <div class="status-dot"></div>
+          <span>System Online</span>
+        </div>
+      </div>
+
+      <div class="overview-grid">
+        <div class="overview-card">
+          <h3>Security Events</h3>
+          <div class="overview-stats">
+            <div class="stat">
+              <span class="stat-label">Total</span>
+              <span class="stat-value" id="total-events">Loading...</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Today</span>
+              <span class="stat-value" id="today-events">Loading...</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">High Risk</span>
+              <span class="stat-value warning" id="high-risk-events">Loading...</span>
+            </div>
+          </div>
+          <div class="recent-items" id="recent-events">
+            <div class="loading-spinner"></div>
+          </div>
+        </div>
+
+        <div class="overview-card">
+          <h3>Security Alerts</h3>
+          <div class="overview-stats">
+            <div class="stat">
+              <span class="stat-label">Active</span>
+              <span class="stat-value" id="active-alerts">Loading...</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Critical</span>
+              <span class="stat-value critical" id="critical-alerts">Loading...</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Resolved</span>
+              <span class="stat-value" id="resolved-alerts">Loading...</span>
+            </div>
+          </div>
+          <div class="recent-items" id="recent-alerts">
+            <div class="loading-spinner"></div>
+          </div>
+        </div>
+
+        <div class="overview-card">
+          <h3>System Health</h3>
+          <div class="overview-stats">
+            <div class="stat">
+              <span class="stat-label">Uptime</span>
+              <span class="stat-value" id="system-uptime">99.9%</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Load</span>
+              <span class="stat-value" id="system-load">0.3</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Memory</span>
+              <span class="stat-value" id="memory-usage">45%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="overview-card">
+          <h3>Quick Actions</h3>
+          <div style="display: flex; flex-direction: column; gap: 1rem;">
+            <button class="btn-primary" onclick="refreshData()">
+              <i class="fas fa-refresh"></i> Refresh Data
+            </button>
+            <button class="btn-primary" onclick="generateSampleData()">
+              <i class="fas fa-plus"></i> Generate Sample Data
+            </button>
+            <button class="btn-primary" onclick="viewLogs()">
+              <i class="fas fa-file-alt"></i> View System Logs
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Dashboard functionality
+    let eventData = [];
+    let alertData = [];
+
+    async function fetchData() {
+      try {
+        const [eventsResponse, alertsResponse] = await Promise.all([
+          fetch('/api/events'),
+          fetch('/api/alerts')
+        ]);
+
+        if (eventsResponse.ok && alertsResponse.ok) {
+          eventData = await eventsResponse.json();
+          alertData = await alertsResponse.json();
+          updateDashboard();
+        } else {
+          showError('Failed to fetch data');
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        showError('Network error occurred');
+      }
+    }
+
+    function updateDashboard() {
+      // Update event stats
+      document.getElementById('total-events').textContent = eventData.length;
+      document.getElementById('today-events').textContent = eventData.filter(e => 
+        new Date(e.createdAt).toDateString() === new Date().toDateString()
+      ).length;
+      document.getElementById('high-risk-events').textContent = eventData.filter(e => 
+        e.severity === 'high' || e.severity === 'critical'
+      ).length;
+
+      // Update alert stats
+      document.getElementById('active-alerts').textContent = alertData.filter(a => 
+        a.status === 'open'
+      ).length;
+      document.getElementById('critical-alerts').textContent = alertData.filter(a => 
+        a.severity === 'critical'
+      ).length;
+      document.getElementById('resolved-alerts').textContent = alertData.filter(a => 
+        a.status === 'resolved'
+      ).length;
+
+      // Update recent events
+      updateRecentEvents();
+      updateRecentAlerts();
+    }
+
+    function updateRecentEvents() {
+      const container = document.getElementById('recent-events');
+      const recentEvents = eventData.slice(0, 5);
+      
+      if (recentEvents.length === 0) {
+        container.innerHTML = '<div class="error-state">No events found</div>';
+        return;
+      }
+
+      container.innerHTML = recentEvents.map(event => `
+        <div class="recent-item">
+          <div class="item-content">
+            <div class="item-title">${event.eventType}</div>
+            <div class="item-time">${new Date(event.createdAt).toLocaleString()}</div>
+          </div>
+          <div class="severity-badge severity-${event.severity}">
+            ${event.severity}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updateRecentAlerts() {
+      const container = document.getElementById('recent-alerts');
+      const recentAlerts = alertData.slice(0, 5);
+      
+      if (recentAlerts.length === 0) {
+        container.innerHTML = '<div class="error-state">No alerts found</div>';
+        return;
+      }
+
+      container.innerHTML = recentAlerts.map(alert => `
+        <div class="recent-item">
+          <div class="item-content">
+            <div class="item-title">${alert.description}</div>
+            <div class="item-time">${new Date(alert.createdAt).toLocaleString()}</div>
+          </div>
+          <div class="severity-badge severity-${alert.severity}">
+            ${alert.severity}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function showError(message) {
+      document.getElementById('recent-events').innerHTML = `<div class="error-state">${message}</div>`;
+      document.getElementById('recent-alerts').innerHTML = `<div class="error-state">${message}</div>`;
+    }
+
+    function refreshData() {
+      fetchData();
+    }
+
+    async function generateSampleData() {
+      try {
+        const sampleEvent = {
+          eventType: 'suspicious_login',
+          sourceType: 'iam',
+          severity: 'medium',
+          rawData: {
+            user: 'test_user',
+            ip: '192.168.1.200',
+            location: 'Unknown'
+          }
+        };
+
+        const response = await fetch('/api/events', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(sampleEvent)
+        });
+
+        if (response.ok) {
+          const createdEvent = await response.json();
+          
+          // Create a corresponding alert
+          const alertData = {
+            eventId: createdEvent.id,
+            alertType: 'anomaly',
+            severity: 'medium',
+            confidence: 0.7,
+            description: 'Suspicious login activity detected'
+          };
+
+          await fetch('/api/alerts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(alertData)
+          });
+
+          refreshData();
+        }
+      } catch (error) {
+        console.error('Error generating sample data:', error);
+      }
+    }
+
+    function viewLogs() {
+      window.open('/api/health', '_blank');
+    }
+
+    // Initialize dashboard
+    fetchData();
+    
+    // Auto-refresh every 30 seconds
+    setInterval(fetchData, 30000);
+  </script>
+</body>
+</html>

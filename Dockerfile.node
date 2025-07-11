@@ -1,0 +1,70 @@
+# Multi-stage build for Node.js application
+FROM node:18-alpine AS base
+
+# Install dependencies for building native modules
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    libc6-compat \
+    curl
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY client/package*.json ./client/
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Build stage for frontend
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app
+
+# Copy frontend source
+COPY client/ ./client/
+COPY shared/ ./shared/
+
+# Install frontend dependencies
+RUN cd client && npm ci
+
+# Build frontend
+RUN cd client && npm run build
+
+# Production stage
+FROM node:18-alpine AS production
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    dumb-init \
+    && addgroup -g 1001 -S nodejs \
+    && adduser -S nextjs -u 1001
+
+WORKDIR /app
+
+# Copy built application
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=frontend-builder /app/client/dist ./client/dist
+COPY package*.json ./
+COPY shared/ ./shared/
+COPY server/ ./server/
+
+# Set ownership
+RUN chown -R nextjs:nodejs /app
+USER nextjs
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/api/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application
+CMD ["npm", "start"]

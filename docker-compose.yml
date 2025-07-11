@@ -1,0 +1,309 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: finsecure-postgres
+    environment:
+      POSTGRES_DB: finsecure
+      POSTGRES_USER: finsecure_user
+      POSTGRES_PASSWORD: finsecure_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finsecure_user -d finsecure"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching and feature store
+  redis:
+    image: redis:7-alpine
+    container_name: finsecure-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Apache Kafka for streaming
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: finsecure-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - finsecure-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: finsecure-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9997:9997"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9997
+      KAFKA_JMX_OPTS: -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=kafka -Dcom.sun.management.jmxremote.rmi.port=9997
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Main application backend (Node.js)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: finsecure-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - DATABASE_URL=postgresql://finsecure_user:finsecure_password@postgres:5432/finsecure
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:29092
+      - ML_SERVICE_URL=http://ml-service:8000
+      - INGESTION_SERVICE_URL=http://ingestion-service:8001
+      - STREAM_PROCESSOR_URL=http://stream-processor:8002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./server:/app/server
+      - ./client/dist:/app/client/dist
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ML Service (Python)
+  ml-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: finsecure-ml-service
+    ports:
+      - "8100:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - DATABASE_URL=postgresql://finsecure_user:finsecure_password@postgres:5432/finsecure
+      - REDIS_URL=redis://redis:6379
+      - MODEL_PATH=/app/models
+      - PYTHONPATH=/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/ml-service:/app
+      - ml_models:/app/models
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Ingestion Service (Go)
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        SERVICE_PATH: services/ingestion-service
+    container_name: finsecure-ingestion
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - WORKER_COUNT=10
+      - DATABASE_URL=postgresql://finsecure_user:finsecure_password@postgres:5432/finsecure
+      - KAFKA_BROKERS=kafka:29092
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./services/ingestion-service:/app
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Stream Processor (Go)
+  stream-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+      args:
+        SERVICE_PATH: services/stream-processor
+    container_name: finsecure-stream-processor
+    ports:
+      - "8002:8002"
+    environment:
+      - PORT=8002
+      - WORKER_COUNT=8
+      - DATABASE_URL=postgresql://finsecure_user:finsecure_password@postgres:5432/finsecure
+      - KAFKA_BROKERS=kafka:29092
+      - REDIS_URL=redis://redis:6379
+      - ML_SERVICE_URL=http://ml-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    volumes:
+      - ./services/stream-processor:/app
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Frontend (served by backend)
+  # The frontend is built and served by the backend service
+
+  # Monitoring and observability (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: finsecure-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - finsecure-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: finsecure-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - finsecure-network
+    restart: unless-stopped
+
+  # MinIO for object storage (optional)
+  minio:
+    image: minio/minio:latest
+    container_name: finsecure-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=finsecure
+      - MINIO_ROOT_PASSWORD=finsecure123
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - finsecure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  kafka_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  ml_models:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  finsecure-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,45 @@
+# Multi-stage build for Python ML service
+FROM python:3.11-slim AS base
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY services/ml-service/requirements.txt ./requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy ML service source code
+COPY services/ml-service/ ./
+
+# Create directories for models and data
+RUN mkdir -p /app/models /app/data /app/logs
+
+# Create non-root user
+RUN groupadd -r mluser && useradd -r -g mluser mluser
+RUN chown -R mluser:mluser /app
+USER mluser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Start the ML service
+CMD ["python", "main.py"]
